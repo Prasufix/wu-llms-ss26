@@ -78,15 +78,18 @@ An automated evaluation pipeline (`evaluate_models.py`) iterated over the entire
 
 ---
 
-## 5. Error Analysis and Limitations
+## 5. Empirical Error Analysis and Limitations
 
-Throughout the development and testing phases, several distinct failure modes were identified and addressed across the models:
+To understand the qualitative failure modes beyond aggregate metrics, an automated error analysis script (`error_analysis.py`) was executed to isolate the lowest-scoring generations (via ROUGE-L) across all models.
 
-1. **Model 1 (Hallucination without grounding):**
-   - *Issue:* Pure zero-shot models often confidently asserted generic German tax logic (e.g., German BGB/EStG) instead of Austrian specificities (öKStG/öEStG) due to the overwhelming presence of federal German data in their pre-training corpus.
-2. **Model 2 (Metadata Leakage & Infinite Repetition Loops):**
-   - *Issue:* During initial evaluations, the fine-tuned model inadvertently generated string artifacts such as `"Lizenziert für: Viktoria.Schwab@aau.at"`, indicating memorization of noisy PDF footers. 
-   - *Fix:* Implementing strict regex filtering prior to tokenization resolved the artifact leakage. Furthermore, the early architectures (`flan-t5-small`) frequently fell into infinite repetition loops during inference, causing extensive execution times and corrupted outputs. By upgrading to `Qwen2.5` and enforcing strict generation penalties (`no_repeat_ngram_size=3`, `repetition_penalty=1.2`), generative looping was entirely eliminated, resulting in efficient execution and highly accurate text generation.
-3. **Model 3 (Retrieval Misses):**
-   - *Issue:* When queries utilized highly abstract phrasing that was not semantically aligned with the dense legal text, the MiniLM retriever fetched irrelevant paragraphs. Confronted with irrelevant context, the generator occasionally forced a hallucination.
-   - *Fix:* Implementing a strict system prompt ("NUTZE AUSSCHLIESSLICH den bereitgestellten Kontext") substantially reduced RAG-induced hallucinations, safely converting retrieval misses into appropriate "I don't know" abstentions.
+1. **Model 1: Linguistic Drift & Ungrounded Generation**
+   - *Observation:* As a pure zero-shot model, Model 1 occasionally suffered from cross-lingual hallucinations (e.g., generating Chinese phrases like *"具体情况而定而定"*) when the prompt lacked distinct contextual bounds.
+   - *Issue:* Without retrieval grounding, the model fabricated broad, plausible-sounding answers that were factually incorrect regarding Austrian Law (e.g., confidently asserting a 12-month period for financial integration rather than the legally correct entire financial year).
+
+2. **Model 2: Knowledge Distortion & Bizarre Fabrications**
+   - *Observation:* The aggressively fine-tuned 1.5B parameter variant exhibited severe degradation in semantic logic when answering complex queries.
+   - *Issue:* When challenged with nuanced corporate tax concepts, it generated nonsensical constraints—such as defining holding requirements as *"ein Vielfaches von einer Monatsrente"* (a multiple of a monthly pension) or fabricating non-existent entities like *"kapitalistischen Gesellschaft"*. The heavily constrained 1.5B architecture ultimately lacked the parameter capacity to reliably store or extrapolate deep legal taxonomy via LoRA fine-tuning alone. 
+
+3. **Model 3: Context Misses & Safe Refusals**
+   - *Observation:* The 3B RAG model produced 14 strict "Safe Refusal" abstentions across all dataset items.
+   - *Fix Application:* When queries utilized highly abstract phrasing that the dense MiniLM retriever failed to map to the exact legal paragraph, the generator was confronted with inadequate context. However, rather than forcing a hallucination, the strict system prompt (`"NUTZE AUSSCHLIESSLICH den bereitgestellten Kontext"`) successfully executed its guardrail function. The model safely reverted to a refusal, ensuring reliability.
